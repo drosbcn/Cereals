@@ -8,9 +8,6 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 
-dates <- select(agg_data, month, datestring) %>%
-  unique()
-
 # Convert agg_data to a tbl format to use dplyr on it.
 agg_data <- tbl_df(agg_data)
 
@@ -53,6 +50,7 @@ holidays <- select(cereals, month, tot_sales, christmas_mon, halloween_mon,
                      newyear_mon,easter_mon,july4th_mon)*sales) %>%
   filter(hols!=0)
 
+
 # Create a plot of total sales per month, along with holiday dates.
 # First create a table with necessary data.
 select(cereals, month, tot_sales) %>%
@@ -67,46 +65,6 @@ select(cereals, month, tot_sales) %>%
   theme(legend.position = "none") +
   labs(title="Total sales of cereal, with holidays as red points")
 
-price_IV <- select(cereals, brandname, price_mon, distance_gasoline, brands_factory, wheat_g_price, corn_g_price,
-                   rice_g_price, oat_g_price, barley_g_price, sugar_g_price, 
-                   retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
-                   advertising_chi, earnings_tradetransport, earnings_foodmanuf) %>%
-  mutate(ingred_g_price = wheat_g_price + corn_g_price +
-         rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
-  select(brandname, price_mon, distance_gasoline, brands_factory, ingred_g_price, 
-         retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
-         advertising_chi, earnings_tradetransport, earnings_foodmanuf)
-
-for(i in 2:ncol(price_IV)) {
-  mean_col <- mean(price_IV[,i], na.rm = TRUE)
-  sd_col <- sd(price_IV[,i])
-  price_IV[,i] <- (price_IV[,i] - mean_col)/sd_col
-}
-i <- 2
-mean_col <- mean(price_IV[,i], na.rm = TRUE)
-sd_col <- sd(price_IV[,i])
-price_IV[,i] <- (price_IV[,i] - mean_col)/sd_col
-
-paste(colnames(price_IV[,3:11]), collapse = " + ")
-
-
-
-brands <- matrix(unique(price_IV$brandname))
-beta_IV <- lm(price_mon ~ distance_gasoline + brands_factory + ingred_g_price + 
-                retailprofperquant_mon + foldingpaperboard_ppi + electricity_chi + 
-                advertising_chi + earnings_tradetransport + earnings_foodmanuf
-              , data = price_IV)
-
-
-
-beta_IV <- summary(beta_IV)$coefficients[,1]
-price_IV$price_hat <- cbind(1,price_IV[,3:11]) %*% beta_IV
-
-#######################################################################################
-#######################################################################################
-#######################################################################################
-#######################################################################################
-
 
 # Create a plot of quantity sold vs price
 # First create a table with necessary data
@@ -118,8 +76,74 @@ select(cereals, month, descrip, quant_mon, price_mon) %>%
   ggplot(aes(x=quant, y=price)) +
   geom_point(shape=1, size=1) +
   geom_smooth(method="lm", se=FALSE, col="red") +
-  labs(title = "Price per servings of cereals vs units sold, by product and month", x = "Servings sold", 
-       y = "Price per serving")
+  labs(title = "Price of cereals vs units sold, by product and month", x = "Units sold", 
+       y = "Price")
+
+# Create a table to run the first step of 2-step least squares regression
+price_IV <- select(cereals, store, month, brandname, price_mon, distance_gasoline, brands_factory, wheat_g_price, corn_g_price,
+                   rice_g_price, oat_g_price, barley_g_price, sugar_g_price, 
+                   retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
+                   advertising_chi, earnings_tradetransport, earnings_foodmanuf) %>%
+  mutate(ingred_g_price = wheat_g_price + corn_g_price +
+         rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
+  select(store, month, brandname, price_mon, distance_gasoline, brands_factory, ingred_g_price, 
+         retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
+         advertising_chi, earnings_tradetransport, earnings_foodmanuf)
+
+# Standardise our variables
+for(i in 4:ncol(price_IV)) {
+  mean_col <- mean(price_IV[[i]], na.rm = TRUE)
+  sd_col <- sd(price_IV[[i]])
+  price_IV[[i]] <- (price_IV[[i]] - mean_col)/sd_col
+}
+
+# Test whether our variables have mean 0 and standard deviation of 1:
+# mean_col <- c()
+# sd_col <- c()
+# for(i in 2: ncol(price_IV)) {
+#   mean_col[i] <- mean(price_IV[[i]], na.rm = TRUE)
+#   sd_col[i] <- sd(price_IV[[i]])
+# }
+
+# Run the first step of our regression
+beta_IV <- lm(price_mon ~ distance_gasoline + brands_factory + ingred_g_price + 
+                retailprofperquant_mon + foldingpaperboard_ppi + electricity_chi + 
+                advertising_chi + earnings_tradetransport + earnings_foodmanuf
+              , data = price_IV)
+
+# Store the coefficients of our regression
+beta_IV <- summary(beta_IV)$coefficients[-1,1]
+# Calculate a fitted value of price
+price_IV$price_hat <- as.matrix(price_IV[,5:13]) %*% beta_IV
+
+# Insert back the fitted values of price in our main "cereals" table
+join_price_IV <- price_IV %>%
+    select(store, month, brandname, price_hat)
+cereals <- left_join(cereals, join_price_IV, by = c("store" , "month", "brandname"))
+
+# Calculate market shares
+total <- select(cereals, store, month, brandname, tot_sales) %>%
+  group_by(store, brandname, month) %>%
+  summarise(sales = sum(tot_sales))
+
+total <- total %>%
+  group_by(store, month) %>%
+  summarise(market_size = sum(sales)) %>%
+  full_join(total, by = c("store", "month")) %>%
+  mutate(market_share = sales/market_size) %>%
+  select(store, month, brandname, market_share)
+
+cereals <- left_join(cereals, total, by = c("store", "month", "brandname"))
+
+
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
+
+
 
 # Set up the quantity sold data to use in regression
  quant_reg <- select(cereals, month, manufacturername, quant_mon) %>%
