@@ -67,6 +67,46 @@ select(cereals, month, tot_sales) %>%
   theme(legend.position = "none") +
   labs(title="Total sales of cereal, with holidays as red points")
 
+price_IV <- select(cereals, brandname, price_mon, distance_gasoline, brands_factory, wheat_g_price, corn_g_price,
+                   rice_g_price, oat_g_price, barley_g_price, sugar_g_price, 
+                   retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
+                   advertising_chi, earnings_tradetransport, earnings_foodmanuf) %>%
+  mutate(ingred_g_price = wheat_g_price + corn_g_price +
+         rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
+  select(brandname, price_mon, distance_gasoline, brands_factory, ingred_g_price, 
+         retailprofperquant_mon, foldingpaperboard_ppi, electricity_chi, 
+         advertising_chi, earnings_tradetransport, earnings_foodmanuf)
+
+for(i in 2:ncol(price_IV)) {
+  mean_col <- mean(price_IV[,i], na.rm = TRUE)
+  sd_col <- sd(price_IV[,i])
+  price_IV[,i] <- (price_IV[,i] - mean_col)/sd_col
+}
+i <- 2
+mean_col <- mean(price_IV[,i], na.rm = TRUE)
+sd_col <- sd(price_IV[,i])
+price_IV[,i] <- (price_IV[,i] - mean_col)/sd_col
+
+paste(colnames(price_IV[,3:11]), collapse = " + ")
+
+
+
+brands <- matrix(unique(price_IV$brandname))
+beta_IV <- lm(price_mon ~ distance_gasoline + brands_factory + ingred_g_price + 
+                retailprofperquant_mon + foldingpaperboard_ppi + electricity_chi + 
+                advertising_chi + earnings_tradetransport + earnings_foodmanuf
+              , data = price_IV)
+
+
+
+beta_IV <- summary(beta_IV)$coefficients[,1]
+price_IV$price_hat <- cbind(1,price_IV[,3:11]) %*% beta_IV
+
+#######################################################################################
+#######################################################################################
+#######################################################################################
+#######################################################################################
+
 
 # Create a plot of quantity sold vs price
 # First create a table with necessary data
@@ -83,17 +123,17 @@ select(cereals, month, descrip, quant_mon, price_mon) %>%
 
 # Set up the quantity sold data to use in regression
  quant_reg <- select(cereals, month, manufacturername, quant_mon) %>%
-  filter(!is.na(quant_mon)) %>%
   group_by(month, manufacturername) %>%
   summarise(quant_mon=sum(quant_mon)) %>%
   spread(manufacturername,quant_mon)
  
  # Set up the price data to use in regression
  price_reg <- select(cereals, month, manufacturername, price_mon) %>%
-   filter(!is.na(price_mon)) %>%
    group_by(month, manufacturername) %>%
    summarise(price_mon=mean(price_mon)) %>%
    spread(manufacturername,price_mon)
+ 
+reg_ <- merge(quant_reg, price_reg, by = "month") 
 
 
  
