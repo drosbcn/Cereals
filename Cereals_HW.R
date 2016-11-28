@@ -9,8 +9,6 @@ library(dplyr)
 library(tidyr)
 library(reshape)
 
-# Convert agg_data to a tbl format to use dplyr on it.
-agg_data <- tbl_df(agg_data)
 
 # Create a new variable for sales value by multiplying quantity and price
 # Create a measure of price per serving
@@ -121,24 +119,24 @@ ing_input <- select(cereals, kids, brandname, ends_with("_g")) %>%
     labs(title = "Ingredients per 100g, adult (left) vs kids (right) cereal", x = "") +
     theme(axis.text.x = element_blank())
 
+
+
 # Create a table to run the first step of 2-step least squares regression
-price_IV <- select(cereals, month, kids, brandname, price_mon, 
+price_IV <- select(cereals, store, month, kids, brandname, price_mon, retailmargin_mon, 
                    distance_gasoline, wheat_g_price, corn_g_price,
                    rice_g_price, oat_g_price, barley_g_price, sugar_g_price, 
-                   retailprofperquant_mon) %>%
+                   electricityprice_midwest, advertising_chi, brands_factory) %>%
   filter(kids == 0) %>%
   mutate(ingred_g_price = wheat_g_price + corn_g_price +
          rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
-  group_by(month, brandname) %>%
-  summarise(price_mon = mean(price_mon), distance_gasoline = mean(distance_gasoline),
-          retail_markup = mean(retailprofperquant_mon), 
-          ingred_g_price = mean(ingred_g_price))
+  select(-wheat_g_price, -corn_g_price, -rice_g_price, -oat_g_price, -barley_g_price,
+         -sugar_g_price, -kids) 
 
 # Standardise our variables
-for(i in 3:ncol(price_IV)) {
-  mean_col <- mean(price_IV[[i]], na.rm = TRUE)
-  sd_col <- sd(price_IV[[i]])
-  price_IV[[i]] <- (price_IV[[i]] - mean_col)/sd_col
+for(i in 4:ncol(price_IV)) {
+  mean_col <- mean(price_IV[,i], na.rm = TRUE)
+  sd_col <- sd(price_IV[,i], na.rm = TRUE)
+  price_IV[[i]] <- (price_IV[,i] - mean_col)/sd_col
 }
 
 # Test whether our variables have mean 0 and standard deviation of 1:
@@ -152,8 +150,9 @@ for(i in 3:ncol(price_IV)) {
 # sd_col
 
 # Run the first step of our regression
-beta_IV <- lm(price_mon ~ distance_gasoline + retail_markup + ingred_g_price, data = price_IV)
-beta_IV
+beta_IV <- lm(price_mon ~ distance_gasoline + retailmargin_mon + ingred_g_price +
+                electricityprice_midwest + advertising_chi + brands_factory, data = price_IV)
+summary(beta_IV)
 # Store the coefficients of our regression
 beta_IV <- summary(beta_IV)$coefficients[-1,1]
 # Calculate a fitted value of price
