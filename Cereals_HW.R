@@ -17,6 +17,7 @@ cereals <- mutate(agg_data, quant_mon = quant_mon*qty, price_mon = price_mon/qty
                   tot_sales = price_mon*quant_mon) %>%
   filter(month > 0)
 
+
 # Plot market shares per manufacturername, for each month
 # First create a table with appropriate data
 select(cereals, month, manufacturername, tot_sales) %>%
@@ -130,7 +131,20 @@ price_IV <- select(cereals, store, month, kids, brandname, price_mon, retailmarg
   mutate(ingred_g_price = wheat_g_price + corn_g_price +
          rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
   select(-wheat_g_price, -corn_g_price, -rice_g_price, -oat_g_price, -barley_g_price,
+<<<<<<< Updated upstream
          -sugar_g_price, -kids) 
+=======
+         -sugar_g_price, -kids) %>%
+  group_by(month, brandname) %>%
+  summarise(price_mon = mean(price_mon),
+    ingred_g_price = mean(ingred_g_price), retailprofperquant_mon = mean(retailprofperquant_mon),
+            distance_gasoline = mean(distance_gasoline),
+            electricityprice_midwest = mean(electricityprice_midwest), 
+            advertising_chi = mean(advertising_chi),
+            foldingpaperboard_ppi = mean(foldingpaperboard_ppi))
+
+
+>>>>>>> Stashed changes
 
 # Standardise our variables
 for(i in 4:ncol(price_IV)) {
@@ -156,8 +170,32 @@ summary(beta_IV)
 # Store the coefficients of our regression
 beta_IV <- summary(beta_IV)$coefficients[-1,1]
 # Calculate a fitted value of price
+<<<<<<< Updated upstream
 price_IV$price_hat <- as.matrix(price_IV[,4:6]) %*% beta_IV 
 price_IV <- select(price_IV, month, brandname, price_hat, price_mon)
+=======
+price_IV$price_hat <- as.matrix(cbind(1,price_IV[,4:9])) %*% beta_IV 
+# price_IV <- select(price_IV, month, brandname, price_hat, price_mon)
+qplot(price_hat, price_mon, data=price_IV)
+
+# Calculate the share of outside good, using the difference between the average market share 
+# of adult cereal and taking the difference with the average share of adult population. The 
+# idea is that the potential market share is represented by the share of adults in
+# the population.
+outside_good_share <- select(cereals, month, kids, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  mutate(kids = as.factor(kids)) %>%
+  group_by(month, kids) %>%
+  summarise(quant_mon = sum(quant_mon))
+out_good_2 <- outside_good_share %>%
+  group_by(month) %>%
+  summarise(market = sum(quant_mon))
+outside_good_share <- merge(outside_good_share, out_good_2, by = "month") 
+outside_good_share <-  mutate(outside_good_share, market_share = quant_mon / market) %>%
+  filter(kids == 0) %>%
+  mutate(M = 1 - mean(cereals$age9), out_good_share = M - market_share) %>%
+  select(month, out_good_share)
+>>>>>>> Stashed changes
 
 # Calculate market shares, to be stored in total_2
 total <- select(cereals, kids, month, brandname, quant_mon) %>%

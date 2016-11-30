@@ -1,0 +1,323 @@
+---
+title: "The breakfast cereal market in the US"
+author: "Davide Viviano, Santiago Paz, Jonas Westermann, David Rosenfeld"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# Import ggplot and dplyr
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(reshape)
+
+# Set working directory and import data
+setwd("~/Documents/Econ/PS 2/")
+agg_data <- read.csv("cereals.csv")
+
+# Create a new variable for sales value by multiplying quantity and price
+# Create a measure of price per serving
+# Create a measure of quantity sold in serving size
+cereals <- mutate(agg_data, quant_mon = quant_mon*qty, price_mon = price_mon/qty,
+                  quant_mon = price_mon*quant_mon) %>%
+  filter(month > 0)
+```
+
+\section{Industry analysis}
+
+This report analyses cereal scanner data from the US that is organised by store, month and product, and comes with over 300 variables associated. In the first part of the report, we analyse the dataset using a mix of graphs and descriptive statistics.
+
+The data contains information regarding sales of the following 30 brands of cereal, classified by whether they are children's cereal or not (kids = 1 for children's cereal). As we can see from the above table, there are 20 brands of adult cereal, and 10 of kids' cereal.
+
+```{r, echo = FALSE}
+select(cereals, month, brandname, kids) %>%
+  group_by(brandname) %>%
+  summarise(kids_cereal = mean(kids)) %>%
+  arrange(kids_cereal) %>%
+  as.data.frame()
+
+```
+
+Despite doubts as to the classification method which led to Rice Krispies and Cheerios to be classified as adult cereal, we decide to keep the current classification.
+
+Next, we check is the dispertion of two of the most important variables: price and quantity sold. We see that quantity is highly skewed to the right, and has a very large proportion of quantities sold stacked at a low level below the mean. The price variable is less skewed.
+
+```{r, echo = FALSE}
+price_stand <- cereals %>%
+  select(price_mon) %>%
+  mutate(mean_p = mean(price_mon), sd_p = sd(price_mon), label = "price") %>%
+  mutate(value = (price_mon - mean_p) / sd_p) %>%
+  select(value, label)
+
+quant_stand <- cereals %>%
+  select(quant_mon) %>%
+  mutate(mean_q = mean(quant_mon), sd_q = sd(quant_mon), label = "quantity") %>%
+  mutate(value = (quant_mon - mean_q) / sd_q) %>%
+  select(value, label)
+
+stand <- rbind(price_stand, quant_stand)
+
+ggplot(stand, aes(x = value, fill = label)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Dispersion of price and quantity", x = "Dispertion around the mean")
+
+```
+
+
+The breakfast cereal market includes 7 companies with the following market shares:
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+# Plot market shares per manufacturername, for each month
+# First create a table with appropriate data
+select(cereals, month, manufacturername, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  group_by(manufacturername, month) %>%
+  summarise(sales = sum(quant_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=month, y=sales, fill=manufacturername)) +
+  geom_area(stat="identity",position="fill", alpha=0.5) +
+  theme_classic() +
+  labs(title="Market shares by manufacturer", y="Market share")
+
+```
+
+From this graph we note that Kelloggs has the largest market share, followed by General Mills. We also note that Kraft and Nabisco/Kraft appear to be merged here, possibly reflecting their merger at some point in the months considered. The market shares by manufacturer appear roughly stable through time.
+
+We also considere manufacturers' market shares with the adult and children cereal markets separately in the following graph:
+
+```{r, fig.height = 3, fig.width = 4, echo = FALSE}
+# Plot market shares per manufacturername, for each month
+# First create a table with appropriate data
+select(cereals, kids, month, manufacturername, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  mutate(kids = as.factor(kids)) %>%
+  group_by(kids, manufacturername) %>%
+  summarise(sales = sum(quant_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=kids, y=sales, fill=manufacturername)) +
+  geom_bar(stat="identity",position="fill", alpha=0.5) +
+  theme_classic() +
+  labs(title="Market shares by manufacturer", y="Market share")
+
+```
+
+From the graph above we note that the children cereal sector is more concentrated than the overall (and the adult) cereal sector, with both Kelloggs and especially General Mills making up together over 75% of the market share. The adult cereal market is more balanced between the different manufacturers.
+
+The following graph show the market shares of adult and children cereal through time. It reveals that adult cereal makes up around two-thirds of cereal sold in the reported data, and this proportion is roughly stable through time:
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+# Plot market shares for kids vs adult cereal, for each month
+# First create a table with appropriate data
+select(cereals, month, kids, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  mutate(kids = as.factor(kids)) %>%
+  group_by(kids, month) %>%
+  summarise(sales = sum(quant_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=month, y=sales, fill=kids)) +
+  geom_area(stat="identity",position="fill", alpha=0.5) +
+  theme_classic() +
+  labs(title="Market shares for adult (pink) vs kids (blue) cereal", y="Market share")
+```
+
+The following graph shows market shares for each of the 7 stores. We note that market shares are roughly stable across stores:
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+# Plot market shares per manufacturername, for each month
+# First create a table with appropriate data
+select(cereals, store, month, manufacturername, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  mutate(store = as.factor(store)) %>%
+  group_by(store, manufacturername) %>%
+  summarise(sales = sum(quant_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=store, y=sales, fill=manufacturername)) +
+  geom_bar(stat="identity",position="fill", alpha=0.5) +
+  theme_classic() +
+  labs(title="Market shares by manufacturer", x = "store ID", y="Market share")
+
+```
+
+We also consider total quantity sold of cereal through time in the next graph. There appears to be a significant variation in sales through time. We also plot holidays (christmas, halloween, thanksgiving, new year, easter and July 4th) as red dots to see whether there is any obvious relationship between these and total sales but do not notice anything obvious;
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+# Create a variable giving total sales only for holidays
+holidays <- select(cereals, month, quant_mon, christmas_mon, halloween_mon, 
+                   thanksgiving_mon, newyear_mon, easter_mon, july4th_mon) %>%
+  group_by(month) %>%
+  summarise(sales=sum(quant_mon),hols=max(christmas_mon,halloween_mon,thanksgiving_mon,
+                     newyear_mon,easter_mon,july4th_mon)*sales) %>%
+  filter(hols!=0)
+
+
+# Create a plot of total sales per month, along with holiday dates.
+# First create a table with necessary data.
+select(cereals, month, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  group_by(month) %>%
+  summarise(sales = sum(quant_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=month, y=sales, ymin = 0)) +
+  geom_line() +
+  geom_point(inherit.aes = FALSE, data=holidays, aes(x=month, y=hols, col=I("red"), 
+                                                     size=1, alpha=0.5)) +
+  theme(legend.position = "none") +
+  labs(title="Total quantity solds of cereal, with holidays as red points")
+```
+
+Next we plot price against quantity and find a negative relationship between them. Naturally this is not proof of a downward-sloping demand curve, especially in a market with such differenciated products as breakfast cereal.
+
+```{r, fig.height = 3, fig.width = 5, echo = FALSE}
+# Create a plot of quantity sold vs price
+# First create a table with necessary data
+select(cereals, month, brandname, quant_mon, price_mon) %>%
+  filter(!is.na(quant_mon), !is.na(price_mon)) %>%
+  group_by(month, brandname) %>%
+  summarise(quant=sum(quant_mon), price=mean(price_mon)) %>%
+  # Plot the data
+  ggplot(aes(x=quant, y=price)) +
+  geom_point(shape=1, size=1) +
+  geom_smooth(method="lm", se=FALSE, col="red") +
+  labs(title = "Price of cereal vs units sold, by product and month", x = "Units sold", 
+       y = "Price")
+```
+
+We reproduce the graph above but split it by adult and kids' cereal. To highlight the differences in the two sectors even more, we colour the point according to their sugar content. We find that the kids' cereal sector has a more negative correlation between price and units sold than the adult sector, as well as a higher concentration of sugar (indicated by the lighter colour). We also note that there is greater variation in price in the adult cereal sector than in the kids' cereal sector.
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+
+# Create a table with dummy variable for kids cereal to us for join in next step
+kids_sugars_table <- select(cereals, month, brandname, kids, sugarsg)
+
+# Create plot facetted for adult and kids' cereal
+select(cereals, month, brandname, quant_mon, price_mon) %>%
+  filter(!is.na(quant_mon), !is.na(price_mon)) %>%
+  group_by(month, brandname) %>%
+  summarise(quant=sum(quant_mon), price=mean(price_mon)) %>%
+  left_join(kids_sugars_table, by = c("month", "brandname")) %>%
+  # Plot the data
+  ggplot(aes(x=quant, y=price, col = sugarsg)) +
+  geom_point(shape=1, size=1) +
+  geom_smooth(method="lm", se=FALSE, col="red") +
+  facet_grid(. ~ kids) +
+  labs(title = "Price  vs units sold, for adult (left) and kids (right) cereal", x = "Units sold", y = "Price")
+
+
+```
+
+Next we turn to some of the other variables in our dataset. In particular, we consider the change in crop prices over time, since these could be a driver for change in price of cereal:
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+
+# Graph crop prices. Use for loop to rescale as an index starting in month 1.
+price_us <- select(cereals, month, contains("_price_us")) %>%
+  filter(!duplicated(month))
+      for(j in 2:length(price_us)){
+        price_us[,j] <- 100 * price_us[,j] / price_us[1,j]
+      }
+  melt(price_us, id = "month") %>%
+  ggplot(aes(x = month, y = value, col = variable)) +
+    geom_line(size = 1) +
+    labs(title = "Crop prices per bushel", y = "Index: week 1 = 100")
+
+
+```
+
+From the above graph we find that the crops with the greatest price variation over the time period considered are (in descending order) oats, wheat, and corn, with a spike between months 70 and 80. This could matter if cereal composition varies significantly be ingredient. We consider this factor in the next graph, where we look at ingredients per 100g of cereal for each brand, split between adult and kids' sectors:
+
+```{r, fig.height = 3, fig.width = 6, echo = FALSE}
+
+# Create plots with ingredient inputs per cereal, divided between adult and kids  
+ing_input <- select(cereals, kids, brandname, ends_with("_g")) %>%
+  group_by(kids, brandname) %>%
+  filter(!duplicated(brandname))  %>%
+  mutate(total_inputs = sum(corn_g, wheat_g, rice_g, barley_g, oat_g)) %>%
+  as.data.frame()
+  melt(ing_input, id = c("kids", "total_inputs", "brandname")) %>%
+  ggplot(aes(x = reorder(brandname, -total_inputs), y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "stack") +
+    facet_grid(. ~kids) +
+    labs(title = "Ingredients per 100g, adult (left) vs kids (right) cereal", x = "") +
+    theme(axis.text.x = element_blank())
+
+```
+
+We note that there is greater variety in ingredients in the adult sector, and especially more wheat and rice. The kids' cereal sector seems to consist almost entirely of corn- and oat- based cereal (with one cereal brand containing wheat). We also note that for 5 cereal brands, the total ingredient content per 100g adds up to over 100g. This could signal some problem with the data provided.
+
+\section{Demand estimation: the adult cereal market}
+
+Spurred by our observation that adult and children's cereal display significant differences, we decide to focus on the adult cereal sector. Specifically, we estimate the own-price and cross-price elasticities of market shares for brands in this sector by using a multinomial logit regression.
+
+This model entails first estimating a model which regresses utility $\delta_k$ from consuming product $k$ against characteristics of this product, including its price. Specifically, it uses as a proxy for utility the difference between the log of product $k$'s market share and the log of the market share of the *outside good*. The *outside good* market share corresponds to the share of consumers who could be consuming adult cereal but currently are not. We will explain how we estimate this share further on.
+
+The regression we intend to run is thus:
+
+$$ln(s_k) - ln(s_k) = \delta_k = x_k' - alpha + \xi_k$$
+
+In the above regression, $\xi_k$ reflects the fact that we are likely to have omitted variable bias, that is to say that our error term will include a variable which is correlated with our explanatory variables, and which will impact our dependent variable.
+
+To correct for this, we  introduce instrumental variables which we regress our price variable against, and then use a *predicted* (or *fitted*) value for the price to run the regression above. We use as instruments proxies for costs of production, since these are likely to have a high explanatory power for price, but we choose inputs which are unlikely to affect demand or market share (at least in the short run):
+
+$$price_mon = \beta_0 + \beta_1.ingred\_g\_price + \beta_2.retailprofperquant\_mon + \beta_3.distance\_gasoline + 
+              \beta_4.electricityprice\_midwest +$$
+              $$\beta_5.advertising\_chi + \beta_6.foldingpaperboard\_ppi$$
+              
+Where:
+
+* $price_mon$ is the monthly price for the brand.
+* $ingred\_g\_price$ is the expenditure on a set of ingredients per 100g of cereals. It is the sum of variables $sugar\_g\_price, barley\_g\_price, oat\_g\_price, rice\_g\_price, wheat\_g\_price$ and $corn\_g\_price$.
+* $retailprofperquant\_mon$ is the retail charge per quantity sold, or in other words, the markup set by the retailer.
+* $distance\_gasoline$ is the distance to the factory in miles, used here to proxy for transport costs.
+* $electricityprice\_midwest$ is an electricity price indicator.
+* $advertising\_chi$ is a price index for advertising costs.
+* $foldingpaperboard\_ppi$ is the Producer Price Index for folding paperboard boxes, packaging, and packaging components. 
+
+After having run this regression, we save our $beta$ estimates, and use these to obtain a predicted value of $price_mon$, which we call $price_hat$. We will then use this $price_hat$ variable in the next step of our regression.
+
+```{r echo = FALSE}
+# Create a table to run the first step of 2-step least squares regression
+price_IV <- select(cereals, store, month, kids, brandname, price_mon, wheat_g_price, corn_g_price,
+                   rice_g_price, oat_g_price, barley_g_price, sugar_g_price, 
+                   retailprofperquant_mon, distance_gasoline, 
+                   electricityprice_midwest, advertising_chi,
+                   foldingpaperboard_ppi) %>%
+  filter(kids == 0) %>%
+  mutate(ingred_g_price = wheat_g_price + corn_g_price +
+         rice_g_price + oat_g_price + barley_g_price + sugar_g_price) %>%
+  select(-wheat_g_price, -corn_g_price, -rice_g_price, -oat_g_price, -barley_g_price,
+         -sugar_g_price, -kids) %>%
+  group_by(month, brandname) %>%
+  summarise(price_mon = mean(price_mon),
+    ingred_g_price = mean(ingred_g_price), retailprofperquant_mon = mean(retailprofperquant_mon),
+            distance_gasoline = mean(distance_gasoline),
+            electricityprice_midwest = mean(electricityprice_midwest), 
+            advertising_chi = mean(advertising_chi),
+            foldingpaperboard_ppi = mean(foldingpaperboard_ppi))
+
+# Run the first step of our regression
+beta_IV <- lm(price_mon ~ ingred_g_price + retailprofperquant_mon + distance_gasoline + 
+              electricityprice_midwest + advertising_chi +
+              foldingpaperboard_ppi, data = price_IV)
+
+# Store the coefficients of our regression
+beta_IV <- summary(beta_IV)$coefficients[,1]
+# Calculate a fitted value of price
+price_IV$price_hat <- as.matrix(cbind(1,price_IV[,4:9])) %*% beta_IV 
+```
+
+We plot our fitted value $price_hat$ against the actual $price_mon$ variable in the following graph, along with a 45 degree line:
+
+```{r fig.height = 3, fig.width = 4, echo = FALSE}
+# price_IV <- select(price_IV, month, brandname, price_hat, price_mon)
+ggplot(price_IV, aes(x = price_mon, y = price_hat)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, size = 1, col = "red", alpha = 0.5) +
+  labs(title = "Price_hat vs price_mon, and 45 degree line")
+```
+
+The next element we need is to compute our outside share, which in our case is the difference between the potential market $M$ for adult cereal and the current market. For our purpose, we assume our potential market to be the share of the population above the age of 9, times the total market for cereal. This assumption has obviously clear limitations and relies on quite heroic assumptions: for instance, it does not include consumers who do not consume breakfast cereal at all (who may prefer to eat toast, eggs or nothing in the morning, for example). Given the limited amount of data and time, however, this seems like a reasonable assumption.
+
+As such, our outside share will be the difference between our potential market $M$ and the current total sales of adult breakfast cereal. 
