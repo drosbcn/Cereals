@@ -321,3 +321,88 @@ ggplot(price_IV, aes(x = price_mon, y = price_hat)) +
 The next element we need is to compute our outside share, which in our case is the difference between the potential market $M$ for adult cereal and the current market. For our purpose, we assume our potential market to be the share of the population above the age of 9, times the total market for cereal. This assumption has obviously clear limitations and relies on quite heroic assumptions: for instance, it does not include consumers who do not consume breakfast cereal at all (who may prefer to eat toast, eggs or nothing in the morning, for example). Given the limited amount of data and time, however, this seems like a reasonable assumption.
 
 As such, our outside share will be the difference between our potential market $M$ and the current total sales of adult breakfast cereal. 
+
+
+## Exercise 3
+
+
+## Introduction
+
+The question of interest is how each firm react to decision of other firms in terms of price setting. To do so, we have concentrated our effort in studying the correlation among monthly prices between different firms. If firms are strongly competing for the same segment of consumers, we would expect highly correlated prices, while low correlation would correspond to a less aggressive competition that might be dictated by several factors. Two of them might be either anti-competitive agreements among firms or simply a different target of consumers due to high differentiability of the products. Generally speaking, from this analysis we can have a broad picture on the degree of competition within the industry.
+
+## Assumptions
+
+To simplify the analysis, we have considered the averaged prices of each company across all its product per each month. Therefore, we have assumed that each company has a similar degree of sustitability among products. 
+
+## Theoretical Background
+
+To compute the correlation matrix we first have to follow some important step. First, we must be able to identify correlation among firms conditional on market prices not to make it depending on external factors. Therefore we run a regression of each company on market price and we use the residuals as new variables. To compute the matrix $\Sigma$ containing the information about the correlation among the firms, we use the sample covariance matrix $\frac{1}{T}(X'X)$. Finally, to induce sparsity in the matrix we use Graphical Lasso. The methodology estimates the covariance matrix using maximum likelhood estimation with a penalization term given by the sum of the absolute values of the elements in the matrix. The value that control the penalization is named $\pho$. Setting a very low value for $\rho$ we are able to preserve most of the sample covariance matrix and to discard low correlations that can be due to random noise.
+
+
+## Methodology 
+
+First, we have created a panel reporting the average monthly price of each firm per each month. Then we have run a regression per each firm on market prices. To compute market prices we have used the first principal component of the panel. This well-known technique, of common usage in finance, simply relates to the definition of principal component, corrisponding to the vector of the matrix that explains most of the variance of the whole market. Then we have sorted the columns by decreasing market share, in order to see whether this might effect correlation on prices.
+
+
+```{r}
+
+## Creat a matrix of prices: use the reg table with already aggregated data
+
+panel <- select(cereals, store, month, price_mon, manufacturername) %>%
+       group_by(month, manufacturername) %>%
+       summarise(price = mean(price_mon))
+panel <- as.data.frame(panel)    
+panel <- reshape(panel, idvar="month",timevar="manufacturername", direction = "wide")
+
+## Compute the quantity sold
+
+mean_quantity <- select(cereals, manufacturername, quant_mon) %>%
+  group_by(manufacturername) %>%
+  summarise(quant = mean(quant_mon))
+mean_quantity
+## Sort data from bigger to lowest quantity (no effect on the analysis)
+## Leave out the time variable
+data <- panel[,c(4,7,3,6,5,2,8)]
+
+## Regress each one on the first principal component
+
+princ <- prcomp(data)
+first_PCA <- princ$x[,1]
+
+new_data <- NULL
+for (i in 1:ncol(data)){
+  reg <- lm(data[,i]~ first_PCA)
+  res <- data[,i] - predict(reg)
+  new_data <- cbind(new_data,res)
+}
+new_data <- as.data.frame(new_data)
+names(new_data) <- names(data)
+
+new_data <- as.matrix(new_data)
+cov <- cov(new_data)
+colnames(cov) <- substr(colnames(cov), 6, nchar(cov))
+library(lattice)
+levelplot(cov)
+```
+
+The result from the previous graph show no strong correlation in the south-west part of the matrix. Conditional on market prices, big companies do not seem to be correlated each other. This is a plausible result. In fact, given the small number of companies, big companies are probably strongly correlated with market prices and no further correlation is left. In the top-right corner we observe instead that smaller companies tend to be more correlated each other. Nabisco and Kraft show a very high correlation, as we would expect. Also Ralston and Dominicks tend to have an high correlation. To show the final results we have defined a small network, inducing a bit of sparsity to drop most of the edges. 
+
+
+```{r}
+shrinked <- glasso(cov, rho=0.0001)
+levelplot(shrinked$w)
+library(igraph)
+colnames(shrinked$w) <- colnames(cov)
+diag(shrinked$w) <- 0
+graph<-graph.adjacency(shrinked$w,weighted=TRUE,mode="lower")
+plot(graph, vertex.size=50)
+
+
+```
+
+
+To conclude the analysis lead to the following results: 
+
+- Firms prices tend to be low correlated each other conditional on market prices.
+- Smaller firms tend to have higher correlation, that might be linked to an higher degree of competition.
+
