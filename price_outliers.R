@@ -46,4 +46,4 @@ brand.names
    
  possible.brands 
  
- # Seems like there is no brandname time series outliers for price
+ # Seems like there is no brandname time series outliers for price.
