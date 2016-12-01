@@ -1,7 +1,9 @@
 ---
 title: "The breakfast cereal market in the US"
-author: "Davide Viviano, Santiago Paz, Jonas Westermann, David Rosenfeld"
-output: pdf_document
+author: "Santiago Paz, David Rosenfeld, Davide Viviano, Jonas Westermann"
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -13,10 +15,12 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(reshape)
+library(knitr)
+library(glasso)
+library(igraph)
 
 # Set working directory and import data
-setwd("~/Documents/Econ/PS 2/")
-agg_data <- read.csv("cereals.csv")
+agg_data <- read.csv("/Users/jpw/Google Drive/BGSE/Courses/Economic Methods for Data Science/Cereals/cereals.csv")
 
 # Create a new variable for sales value by multiplying quantity and price
 # Create a measure of price per serving
@@ -33,11 +37,11 @@ This report analyses cereal scanner data from the US that is organised by store,
 The data contains information regarding sales of the following 30 brands of cereal, classified by whether they are children's cereal or not (kids = 1 for children's cereal). As we can see from the above table, there are 20 brands of adult cereal, and 10 of kids' cereal.
 
 ```{r, echo = FALSE}
-select(cereals, month, brandname, kids) %>%
+kable(select(cereals, month, brandname, kids) %>%
   group_by(brandname) %>%
   summarise(kids_cereal = mean(kids)) %>%
   arrange(kids_cereal) %>%
-  as.data.frame()
+  as.data.frame())
 
 ```
 
@@ -249,7 +253,7 @@ We note that there is greater variety in ingredients in the adult sector, and es
 
 \section{Demand estimation: the adult cereal market}
 
-Spurred by our observation that adult and children's cereal display significant differences, we decide to focus on the adult cereal sector. Specifically, we estimate the own-price and cross-price elasticities of market shares for brands in this sector by using a multinomial logit regression.
+Spurred by our observation that adult and children's cereal display significant differences, we decide to focus on the adult cereal sector. Specifically, we estimate the own-price and cross-price elasticities of market shares for brands in this sector by using a multinomial logit regression. We run all our analysis by aggregating across all 7 stores.
 
 This model entails first estimating a model which regresses utility $\delta_k$ from consuming product $k$ against characteristics of this product, including its price. Specifically, it uses as a proxy for utility the difference between the log of product $k$'s market share and the log of the market share of the *outside good*. The *outside good* market share corresponds to the share of consumers who could be consuming adult cereal but currently are not. We will explain how we estimate this share further on.
 
@@ -318,33 +322,184 @@ ggplot(price_IV, aes(x = price_mon, y = price_hat)) +
   labs(title = "Price_hat vs price_mon, and 45 degree line")
 ```
 
-The next element we need is to compute our outside share, which in our case is the difference between the potential market $M$ for adult cereal and the current market. For our purpose, we assume our potential market to be the share of the population above the age of 9, times the total market for cereal. This assumption has obviously clear limitations and relies on quite heroic assumptions: for instance, it does not include consumers who do not consume breakfast cereal at all (who may prefer to eat toast, eggs or nothing in the morning, for example). Given the limited amount of data and time, however, this seems like a reasonable assumption.
+The next element we need is to compute our outside share, which in our case is the difference between the potential market $M$ for adult cereal and the current market. For our purpose, we assume our potential market to be the share of the population above the age of 9 (using the variable $age9$), times the total market for cereal. This assumption has obviously clear limitations and relies on quite heroic assumptions: for instance, it does not include consumers who do not consume breakfast cereal at all (who may prefer to eat toast, eggs or nothing in the morning, for example). Given the limited amount of data and time, however, this seems like a reasonable assumption.
 
-As such, our outside share will be the difference between our potential market $M$ and the current total sales of adult breakfast cereal. 
+As such, our outside share will be the difference between our potential market $M$ and the current total sales of adult breakfast cereal, for each month. We then use this to compute our proxy for utility by taking the log of the market share, the log of the outside share, and taking the difference between them.
+
+For our final regression, on top of our fitted $price_hat$ variable, we use characteristics of cereals:
+
+* shredding
+* flaking
+* puffing
+* baking
+* extrusion
+
+So our final regression will look as follows:
+
+$$ln(s_k) - ln(s_k) = \delta_k = \beta_0 + \beta_1.shredding + \beta_2.flaking + \beta_3.puffing + \beta_4.baking + \beta_5.extrusion - \alpha.price\_hat$$
+```{r echo = FALSE}
+# Calculate the share of outside good, using the difference between the average market share 
+# of adult cereal and taking the difference with the average share of adult population. The 
+# idea is that the potential market share is represented by the share of adults in
+# the population.
+outside_good_share <- select(cereals, month, kids, quant_mon) %>%
+  filter(!is.na(quant_mon)) %>%
+  mutate(kids = as.factor(kids)) %>%
+  group_by(month, kids) %>%
+  summarise(quant_mon = sum(quant_mon))
+out_good_2 <- outside_good_share %>%
+  group_by(month) %>%
+  summarise(market = sum(quant_mon))
+outside_good_share <- merge(outside_good_share, out_good_2, by = "month") 
+outside_good_share <-  mutate(outside_good_share, market_share = quant_mon / market) %>%
+  filter(kids == 0) %>%
+  mutate(M = 1 - mean(cereals$age9), out_good_share = M - market_share) %>%
+  select(month, out_good_share)
+
+# Calculate market shares, to be stored in market_shares
+total <- select(cereals, kids, month, brandname, quant_mon) %>%
+  filter(kids == 0) %>%
+  group_by(brandname, month) %>%
+  summarise(quant_mon = sum(quant_mon)) 
+market_shares <- total %>%
+  group_by(month) %>%
+  summarise(market_size = sum(quant_mon))
+market_shares <- full_join(market_shares,total, by = "month") %>%
+  mutate(market_share = quant_mon/market_size) %>%
+  select(month, brandname, market_share) %>%
+  left_join(outside_good_share, by = "month") %>%
+  mutate(market_share = market_share*(1-out_good_share)) %>%
+  mutate(log_market_share = log(market_share), log_out_good_share = log(out_good_share)) %>%
+  mutate(diff_share = log_market_share - log_out_good_share)
 
 
-## Exercise 3
+# Test whether adding up market shares each month sums to 1
+# market_shares %>%
+#   filter(month==5) %>%
+#   group_by(month, out_good_share) %>%
+#   summarise(market = sum(market_share)) %>%
+#   mutate(potential_market = market + out_good_share)
 
 
-## Introduction
+# Create a table for the final regression
+reg_table <- cereals %>%
+  select(kids, month, brandname, shredding, flaking, puffing, baking, extrusion) %>%
+  filter(kids == 0) %>%
+  select(-kids) %>%
+  filter(!duplicated(month, brandname)) %>%
+  left_join(market_shares, by = c("month", "brandname")) %>%
+  left_join(price_IV, by = c("month", "brandname"))
+
+# Standardise our variables
+# for(i in 3:ncol(reg_table)) {
+#   mean_col <- mean(reg_table[[i]], na.rm = TRUE)
+#   sd_col <- sd(reg_table[[i]])
+#   reg_table[[i]] <- (reg_table[[i]] - mean_col)/sd_col
+# }
+
+# Test whether our variables have mean 0 and standard deviation of 1:
+# mean_col <- c()
+# sd_col <- c()
+# for(i in 3: ncol(reg_table)) {
+#   mean_col[i] <- mean(reg_table[[i]], na.rm = TRUE)
+#   sd_col[i] <- sd(reg_table[[i]])
+# }
+# mean_col
+# sd_col
+
+# Run the regression to estimate alpha, the impact of price on market share.
+reg_2 <- lm(diff_share ~ shredding + flaking + puffing + baking + extrusion + price_hat,
+           data = reg_table)
+
+# Save coefficient on price as alpha, to be used to calculate elasticities
+alpha <- -summary(reg_2)$coefficients[6,1]
+```
+
+After having run this regression, we save the $\alpha$ estimate for the effect of $price_hat$ on our utility. We then use this $\alpha$ to compute the own-price elasticity of market share ($\eta_{jj}$) and the cross-price elasticity of market share ($\eta_{jk}$):
+$$\eta_{jj} = -\alpha(1-s_j)p_j$$
+$$\eta_{jk} = \alpha s_kp_k$$
+
+We show in the next table the own-price elasticities (averaged across months for ease of reading), ordered by magnitude:
+
+```{r echo = FALSE}
+
+# Calculate own-price and cross-price elasticities
+eta_table <- reg_table %>%
+  select(month, brandname, market_share, price_mon) %>%
+  mutate(alpha = alpha) %>%
+  mutate(own_price_elast = -alpha * (1 - market_share) * price_mon,
+         cross_price_elast = alpha * market_share * price_mon) 
+
+# Calculate these same variables averaged across months. Also calculate the ratio of the 
+# own_price elasticity divided by the cross-price elasticity.
+elast_summary <- eta_table %>%
+  group_by(brandname) %>%
+  summarise(own_price_elast = mean(own_price_elast),
+            cross_price_elast = mean(cross_price_elast), market_share = mean(market_share)) %>%
+  mutate(own_cross_ratio = - own_price_elast / cross_price_elast)
+
+kable(elast_summary %>%
+  select(brandname, own_price_elast) %>% 
+  arrange(desc(own_price_elast)))
+
+own_cross_table <- elast_summary %>%
+  select(brandname, own_cross_ratio) %>%
+  arrange(desc(own_cross_ratio))
+
+
+```
+
+We show in the next table the cross-price elasticities (averaged across months, for ease of reading), ordered by magnitude:
+```{r echo = FALSE}
+kable(elast_summary %>%
+  select(brandname, cross_price_elast) %>%
+  arrange(cross_price_elast))
+```
+
+
+We summarise our findings in the following graph, which plots cross-price against own-price elasticity, with point size and colour reflecting market share. This graph reflects the negative correlation between own-price and cross-price elasticity. It also reflects the fact that companies with higher market shares tend to have higher cross-price elasticity (understood here as a higher impact on other products' sales for a change in their price).
+
+```{r fig.height = 4, fig.width = 6, echo = FALSE}
+
+ggplot(elast_summary, aes(x = own_price_elast, y = cross_price_elast)) +
+  geom_point(aes(size = market_share, fill = market_share), colour = "black", pch =21) +
+  theme(legend.position = "none") +
+  labs(title = "Own-price vs cross-price elasticity, market share for colour and size")
+```
+
+The next graph shows a more complete (but less clear) picture with the same information as the previous graph, but without averaging, and with a different colour per brand name:
+
+```{r fig.height = 4, fig.width = 6, echo = FALSE}
+
+ggplot(eta_table, aes(x = own_price_elast, y = cross_price_elast)) +
+  geom_point(aes(size = market_share, fill = brandname), colour = "black", pch =21) +
+  theme(legend.position = "none") + 
+  labs(title = "Own-price vs cross-price elasticity, and brand name by colour")
+
+```
+
+
+\section{Price setting}
+
+\subsection{Introduction}
 
 The question of interest is how each firm react to decision of other firms in terms of price setting. To do so, we have concentrated our effort in studying the correlation among monthly prices between different firms. If firms are strongly competing for the same segment of consumers, we would expect highly correlated prices, while low correlation would correspond to a less aggressive competition that might be dictated by several factors. Two of them might be either anti-competitive agreements among firms or simply a different target of consumers due to high differentiability of the products. Generally speaking, from this analysis we can have a broad picture on the degree of competition within the industry.
 
-## Assumptions
+\subsection{Assumptions}
 
 To simplify the analysis, we have considered the averaged prices of each company across all its product per each month. Therefore, we have assumed that each company has a similar degree of sustitability among products. 
 
-## Theoretical Background
+\subsection{Theoretical Background}
 
-To compute the correlation matrix we first have to follow some important step. First, we must be able to identify correlation among firms conditional on market prices not to make it depending on external factors. Therefore we run a regression of each company on market price and we use the residuals as new variables. To compute the matrix $\Sigma$ containing the information about the correlation among the firms, we use the sample covariance matrix $\frac{1}{T}(X'X)$. Finally, to induce sparsity in the matrix we use Graphical Lasso. The methodology estimates the covariance matrix using maximum likelhood estimation with a penalization term given by the sum of the absolute values of the elements in the matrix. The value that control the penalization is named $\pho$. Setting a very low value for $\rho$ we are able to preserve most of the sample covariance matrix and to discard low correlations that can be due to random noise.
+To compute the correlation matrix we first have to follow some important step. First, we must be able to identify correlation among firms conditional on market prices not to make it depending on external factors. Therefore we run a regression of each company on market price and we use the residuals as new variables. To compute the matrix $\Sigma$ containing the information about the correlation among the firms, we use the sample covariance matrix $\frac{1}{T}(X'X)$. Finally, to induce sparsity in the matrix we use Graphical Lasso. The methodology estimates the covariance matrix using maximum likelhood estimation with a penalization term given by the sum of the absolute values of the elements in the matrix. The value that control the penalization is named $\rho$. Setting a very low value for $\rho$ we are able to preserve most of the sample covariance matrix and to discard low correlations that can be due to random noise.
 
 
-## Methodology 
+\subsection{Methodology}
 
 First, we have created a panel reporting the average monthly price of each firm per each month. Then we have run a regression per each firm on market prices. To compute market prices we have used the first principal component of the panel. This well-known technique, of common usage in finance, simply relates to the definition of principal component, corrisponding to the vector of the matrix that explains most of the variance of the whole market. Then we have sorted the columns by decreasing market share, in order to see whether this might effect correlation on prices.
 
 
-```{r}
+```{r, echo = FALSE}
 
 ## Creat a matrix of prices: use the reg table with already aggregated data
 
@@ -387,22 +542,23 @@ levelplot(cov)
 
 The result from the previous graph show no strong correlation in the south-west part of the matrix. Conditional on market prices, big companies do not seem to be correlated each other. This is a plausible result. In fact, given the small number of companies, big companies are probably strongly correlated with market prices and no further correlation is left. In the top-right corner we observe instead that smaller companies tend to be more correlated each other. Nabisco and Kraft show a very high correlation, as we would expect. Also Ralston and Dominicks tend to have an high correlation. To show the final results we have defined a small network, inducing a bit of sparsity to drop most of the edges. 
 
-
-```{r}
+```{r, echo = FALSE}
 shrinked <- glasso(cov, rho=0.0001)
 levelplot(shrinked$w)
+```
+
+
+```{r, echo = FALSE}
 library(igraph)
 colnames(shrinked$w) <- colnames(cov)
 diag(shrinked$w) <- 0
 graph<-graph.adjacency(shrinked$w,weighted=TRUE,mode="lower")
 plot(graph, vertex.size=50)
 
-
 ```
 
 
 To conclude the analysis lead to the following results: 
 
-- Firms prices tend to be low correlated each other conditional on market prices.
-- Smaller firms tend to have higher correlation, that might be linked to an higher degree of competition.
-
+* Firms prices tend to be low correlated each other conditional on market prices.
+* Smaller firms tend to have higher correlation, that might be linked to an higher degree of competition.
